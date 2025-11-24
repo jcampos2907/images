@@ -1,5 +1,5 @@
 # images/git/Dockerfile
-FROM alpine:3.20
+FROM alpine:3.22.2
 
 ARG VERSION
 ENV VERSION=${VERSION:-2.52.0}
