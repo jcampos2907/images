@@ -154,6 +154,7 @@ EOF
                       /kaniko/executor \
                         --context ${dir} \
                         --dockerfile ${dir}/Dockerfile \
+                        --build-arg VERSION=${version} \
                         --destination ${DOCKER_NAMESPACE}/${imageName}:${version} \
                         --destination ${DOCKER_NAMESPACE}/${imageName}:${GIT_SHA} \
                         --destination ${DOCKER_NAMESPACE}/${imageName}:latest \
