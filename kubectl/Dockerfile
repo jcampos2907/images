@@ -1,7 +1,8 @@
 FROM alpine:3.20
 
-ARG KUBECTL_VERSION=v1.31.3
 
+ARG VERSION
+ENV KUBECTL_VERSION=${VERSION:-v1.31.3}
 # Basic tools Jenkins + kubectl need
 RUN apk add --no-cache \
     ca-certificates \
