@@ -158,7 +158,6 @@ EOF
                         --destination ${DOCKER_NAMESPACE}/${imageName}:${GIT_SHA} \
                         --destination ${DOCKER_NAMESPACE}/${imageName}:latest \
                         --cache=true \
-                        --cache-repo ${CACHE_REPO_ROOT}/${imageName} \
                         --snapshot-mode=redo \
                         --use-new-run \
                         --cache-copy-layers \
