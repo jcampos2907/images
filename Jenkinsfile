@@ -31,74 +31,78 @@ spec:
   stages {
 
     stage("Detect Changed Image Folders") {
-      steps {
-        // run diff where git + repo already exist
-        container("jnlp") {
-          script {
-            env.GIT_SHA = sh(script: "git rev-parse --short=8 HEAD", returnStdout: true).trim()
-            def head = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+  steps {
+    container("jnlp") {
+      script {
+        env.GIT_SHA = sh(script: "git rev-parse --short=8 HEAD", returnStdout: true).trim()
+        def head = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
 
-            def base = ""
-            if (env.CHANGE_TARGET) {
-              // PR build: compare against target branch
-              sh "git fetch origin ${env.CHANGE_TARGET}:${env.CHANGE_TARGET} --depth=1"
-              base = sh(script: "git rev-parse ${env.CHANGE_TARGET}", returnStdout: true).trim()
-            } else if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT) {
-              base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT
-            } else {
-              base = sh(script: "git rev-parse HEAD~1", returnStdout: true).trim()
-            }
+        def base = ""
 
-            echo "HEAD = ${head}"
-            echo "BASE = ${base}"
+        if (env.CHANGE_TARGET) {
+          // PR build: compare against target branch
+          sh "git fetch origin ${env.CHANGE_TARGET}:${env.CHANGE_TARGET} --depth=1 || true"
+          base = sh(script: "git rev-parse ${env.CHANGE_TARGET}", returnStdout: true).trim()
 
-            def changedRaw = sh(
-              script: "git diff --name-only ${base}..${head}",
-              returnStdout: true
-            ).trim()
+        } else if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT) {
+          // normal branch build, diff vs last successful build
+          base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT
 
-            if (!changedRaw) {
-              env.CHANGED_DIRS = ""
-              echo "No changes detected."
-              return
-            }
+        } else {
+          // first-ever build on this job: no previous commit
+          echo "First build detected. Building ALL image folders with Dockerfile."
+          
+          def allDirs = sh(
+            script: "find . -mindepth 2 -maxdepth 2 -name Dockerfile -printf '%h\n' | sed 's|^./||' | cut -d/ -f1 | sort -u",
+            returnStdout: true
+          ).trim()
 
-            echo "Changed files:\n${changedRaw}"
-
-            // 🔒 Ignore top-level files explicitly:
-            // only keep changes that are in subfolders (contain '/')
-            def changedInFolders = changedRaw
-              .split("\\n")
-              .findAll { it.contains("/") }
-
-            if (changedInFolders.isEmpty()) {
-              env.CHANGED_DIRS = ""
-              echo "Only top-level files changed. No images to build."
-              return
-            }
-
-            // top-level dir of each changed file
-            def dirs = changedInFolders
-              .collect { it.tokenize('/')[0] }
-              .unique()
-
-            // only dirs that contain a Dockerfile
-            def imageDirs = dirs.findAll { d ->
-              fileExists("${d}/Dockerfile")
-            }
-
-            if (imageDirs.isEmpty()) {
-              env.CHANGED_DIRS = ""
-              echo "No image folders changed."
-              return
-            }
-
-            env.CHANGED_DIRS = imageDirs.join(" ")
-            echo "Changed image dirs: ${env.CHANGED_DIRS}"
-          }
+          env.CHANGED_DIRS = allDirs ?: ""
+          echo "Image dirs for first build: ${env.CHANGED_DIRS}"
+          return
         }
+
+        echo "HEAD = ${head}"
+        echo "BASE = ${base}"
+
+        def changedRaw = sh(
+          script: "git diff --name-only ${base}..${head}",
+          returnStdout: true
+        ).trim()
+
+        if (!changedRaw) {
+          env.CHANGED_DIRS = ""
+          echo "No changes detected."
+          return
+        }
+
+        echo "Changed files:\n${changedRaw}"
+
+        // ignore top-level files explicitly
+        def changedInFolders = changedRaw
+          .split("\\n")
+          .findAll { it.contains("/") }
+
+        if (changedInFolders.isEmpty()) {
+          env.CHANGED_DIRS = ""
+          echo "Only top-level files changed. No images to build."
+          return
+        }
+
+        def dirs = changedInFolders
+          .collect { it.tokenize('/')[0] }
+          .unique()
+
+        def imageDirs = dirs.findAll { d ->
+          fileExists("${d}/Dockerfile")
+        }
+
+        env.CHANGED_DIRS = imageDirs.join(" ")
+        echo "Changed image dirs: ${env.CHANGED_DIRS ?: 'none'}"
       }
     }
+  }
+}
 
     stage("Build & Push Changed Images") {
       when { expression { return env.CHANGED_DIRS?.trim() } }
