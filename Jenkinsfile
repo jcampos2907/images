@@ -121,19 +121,20 @@ spec:
 
             // write auth once
             container("kaniko") {
-              sh """
+             sh '''
                 set -euo pipefail
+
                 cat > /kaniko/.docker/config.json <<EOF
                 {
                   "auths": {
                     "https://index.docker.io/v1/": {
-                      "username": "\$DOCKERHUB_USER",
-                      "password": "\$DOCKERHUB_PASS"
+                      "username": "$DOCKERHUB_USER",
+                      "password": "$DOCKERHUB_PASS"
                     }
                   }
                 }
 EOF
-              """
+              '''
             }
 
             def builds = [:]
