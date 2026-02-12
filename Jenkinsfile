@@ -15,7 +15,7 @@ spec:
     - name: DOCKER_TLS_CERTDIR
       value: ""
     - name: DOCKER_OPTS
-      value: "--ipv6=false"
+      value: "--ipv6=false --dns=8.8.8.8 --dns=1.1.1.1"
     volumeMounts:
     - name: docker-cache
       mountPath: /var/lib/docker
