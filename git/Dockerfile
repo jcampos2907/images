@@ -1,30 +1,48 @@
-FROM alpine:3.20 AS builder
-
-ARG VERSION=2.47.2
-
-RUN apk add --no-cache \
-    make gcc musl-dev \
-    curl-dev expat-dev openssl-dev zlib-dev pcre2-dev \
-    perl autoconf gettext-dev
-
-RUN wget -qO- "https://mirrors.edge.kernel.org/pub/software/scm/git/git-${VERSION}.tar.gz" \
-       | tar -xz -C /tmp \
-    && cd /tmp/git-${VERSION} \
-    && make prefix=/usr/local \
-       NO_TCLTK=1 \
-       USE_LIBPCRE2=1 \
-       all -j"$(nproc)" \
-    && make prefix=/usr/local install
-
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates openssh-client bash curl \
-    libcurl expat pcre2 zlib
+ARG VERSION=2.52.0
+ENV VERSION=${VERSION}
 
-COPY --from=builder /usr/local/bin/git* /usr/local/bin/
-COPY --from=builder /usr/local/libexec/git-core/ /usr/local/libexec/git-core/
-COPY --from=builder /usr/local/share/git-core/ /usr/local/share/git-core/
+# Runtime deps (KEEP these)
+RUN apk add --no-cache \
+    ca-certificates \
+    openssh-client \
+    bash \
+    coreutils \
+    curl \
+    less \
+    perl \
+    zlib \
+    expat \
+    libcurl \
+    pcre2 \
+    gettext-libs \
+    && update-ca-certificates
 
+# Build deps (REMOVE later)
+RUN apk add --no-cache --virtual .build-deps \
+    build-base \
+    autoconf \
+    gettext-dev \
+    zlib-dev \
+    expat-dev \
+    curl-dev \
+    pcre2-dev \
+    perl-dev \
+    tar
+
+WORKDIR /tmp
+
+RUN curl -fsSL "https://www.kernel.org/pub/software/scm/git/git-${VERSION}.tar.gz" -o git.tgz \
+    && tar -xzf git.tgz \
+    && cd git-${VERSION} \
+    && make configure \
+    && ./configure --prefix=/usr \
+    && make -j"$(nproc)" all \
+    && make install \
+    && cd / \
+    && rm -rf /tmp/git* \
+    && apk del .build-deps
+
+# sanity check
 RUN git --version
-
-ENTRYPOINT ["git"]
