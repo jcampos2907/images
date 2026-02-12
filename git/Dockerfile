@@ -1,9 +1,8 @@
-FROM alpine:3.20
+FROM --platform=$TARGETPLATFORM alpine:3.20
 
 ARG VERSION=2.52.0
 ENV VERSION=${VERSION}
 
-# Runtime deps (KEEP these)
 RUN apk add --no-cache \
     ca-certificates \
     openssh-client \
@@ -19,7 +18,6 @@ RUN apk add --no-cache \
     gettext-libs \
     && update-ca-certificates
 
-# Build deps (REMOVE later)
 RUN apk add --no-cache --virtual .build-deps \
     build-base \
     autoconf \
@@ -44,6 +42,4 @@ RUN curl -fsSL "https://www.kernel.org/pub/software/scm/git/git-${VERSION}.tar.g
     && rm -rf /tmp/git* \
     && apk del .build-deps
 
-# sanity check
 RUN git --version
-

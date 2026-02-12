@@ -7,24 +7,26 @@ apiVersion: v1
 kind: Pod
 spec:
   containers:
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:v1.23.2-debug
-    command: ["/busybox/cat"]
-    tty: true
+  - name: docker
+    image: docker:27-dind
+    securityContext:
+      privileged: true
+    env:
+    - name: DOCKER_TLS_CERTDIR
+      value: ""
     volumeMounts:
-      - name: docker-config
-        mountPath: /kaniko/.docker
-
+    - name: docker-cache
+      mountPath: /var/lib/docker
   volumes:
-    - name: docker-config
-      emptyDir: {}
+  - name: docker-cache
+    persistentVolumeClaim:
+      claimName: docker-cache-pvc
 """
     }
   }
 
   environment {
     DOCKER_NAMESPACE = "jicamposr"
-    CACHE_REPO_ROOT  = "jicamposr/images-cache"
     VAULT_PATH       = "kv/apps/jenkins"
   }
 
@@ -36,27 +38,21 @@ spec:
           script {
             env.GIT_SHA = sh(script: "git rev-parse --short=8 HEAD", returnStdout: true).trim()
             def head = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
-
             def base = ""
 
             if (env.CHANGE_TARGET) {
-              // PR build: compare against target branch
               sh "git fetch origin ${env.CHANGE_TARGET}:${env.CHANGE_TARGET} --depth=1 || true"
               base = sh(script: "git rev-parse ${env.CHANGE_TARGET}", returnStdout: true).trim()
 
             } else if (env.GIT_PREVIOUS_SUCCESSFUL_COMMIT) {
-              // normal branch build, diff vs last successful build
               base = env.GIT_PREVIOUS_SUCCESSFUL_COMMIT
 
             } else {
-              // first-ever build on this job: no previous commit
-              echo "First build detected. Building ALL image folders with Dockerfile."
-
+              echo "First build detected. Building ALL image folders."
               def allDirs = sh(
                 script: "find . -mindepth 2 -maxdepth 2 -name Dockerfile -printf '%h\n' | sed 's|^./||' | cut -d/ -f1 | sort -u",
                 returnStdout: true
               ).trim()
-
               env.CHANGED_DIRS = allDirs ?: ""
               echo "Image dirs for first build: ${env.CHANGED_DIRS}"
               return
@@ -78,7 +74,6 @@ spec:
 
             echo "Changed files:\n${changedRaw}"
 
-            // ignore top-level files explicitly
             def changedInFolders = changedRaw
               .split("\\n")
               .findAll { it.contains("/") }
@@ -93,9 +88,7 @@ spec:
               .collect { it.tokenize('/')[0] }
               .unique()
 
-            def imageDirs = dirs.findAll { d ->
-              fileExists("${d}/Dockerfile")
-            }
+            def imageDirs = dirs.findAll { d -> fileExists("${d}/Dockerfile") }
 
             env.CHANGED_DIRS = imageDirs.join(" ")
             echo "Changed image dirs: ${env.CHANGED_DIRS ?: 'none'}"
@@ -118,57 +111,76 @@ spec:
           ]]
 
           withVault(vaultSecrets: secrets) {
-
-            // write auth once
-            container("kaniko") {
+            container("docker") {
               sh '''
-                set -euo pipefail
+                echo "Waiting for Docker daemon..."
+                timeout=60
+                while [ $timeout -gt 0 ]; do
+                  if docker info >/dev/null 2>&1; then
+                    echo "Docker daemon is ready"
+                    break
+                  fi
+                  sleep 2
+                  timeout=$((timeout - 2))
+                done
 
-                cat > /kaniko/.docker/config.json <<EOF
-                {
-                  "auths": {
-                    "https://index.docker.io/v1/": {
-                      "username": "$DOCKERHUB_USER",
-                      "password": "$DOCKERHUB_PASS"
-                    }
-                  }
-                }
-EOF
+                if ! docker info >/dev/null 2>&1; then
+                  echo "ERROR: Docker daemon failed to start"
+                  exit 1
+                fi
+
+                echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
               '''
-            }
 
-            // --- SEQUENTIAL BUILDS (no parallel) ---
-            def dirs = env.CHANGED_DIRS?.trim()
-              ? env.CHANGED_DIRS.split("\\s+")
-              : []
+              def dirs = env.CHANGED_DIRS?.trim()
+                ? env.CHANGED_DIRS.split("\\s+")
+                : []
 
-            for (dir in dirs) {
-              container("kaniko") {
+              for (dir in dirs) {
                 script {
                   def version = readFile("${dir}/version.txt").trim()
                   def imageName = dir
 
-                  echo "== Building ${imageName}:${version} =="
+                  echo "== Building ${imageName}:${version} for linux/arm64 and linux/amd64 =="
 
                   sh """
                     set -euo pipefail
 
-                    /kaniko/executor \
-                      --context ${dir} \
-                      --dockerfile ${dir}/Dockerfile \
+                    docker build \
+                      --platform linux/arm64 \
                       --build-arg VERSION=${version} \
-                      --destination ${DOCKER_NAMESPACE}/${imageName}:${version} \
-                      --destination ${DOCKER_NAMESPACE}/${imageName}:${GIT_SHA} \
-                      --destination ${DOCKER_NAMESPACE}/${imageName}:latest \
-                      --cache-repo ${DOCKER_NAMESPACE}/${imageName}-cache \
-                      --cache=true \
-                      --snapshot-mode=redo \
-                      --use-new-run \
-                      --cache-copy-layers \
-                      --cache-run-layers
+                      --build-arg TARGETARCH=arm64 \
+                      --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
+                      ${dir}
+
+                    docker build \
+                      --platform linux/amd64 \
+                      --build-arg VERSION=${version} \
+                      --build-arg TARGETARCH=amd64 \
+                      --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64 \
+                      ${dir}
+
+                    docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64
+                    docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
+
+                    # Create multi-arch manifest for version tag
+                    docker manifest create ${DOCKER_NAMESPACE}/${imageName}:${version} \
+                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
+                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
+                    docker manifest push ${DOCKER_NAMESPACE}/${imageName}:${version}
+
+                    # Create multi-arch manifest for latest tag
+                    docker manifest create ${DOCKER_NAMESPACE}/${imageName}:latest \
+                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
+                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
+                    docker manifest push ${DOCKER_NAMESPACE}/${imageName}:latest
+
+                    echo "== Done: ${imageName}:${version} (arm64 + amd64) =="
                   """
                 }
               }
+
+              sh "docker logout"
             }
           }
         }
