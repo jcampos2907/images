@@ -98,94 +98,101 @@ spec:
     }
 
     stage("Build & Push Changed Images") {
-      when { expression { return env.CHANGED_DIRS?.trim() } }
-      steps {
-        script {
-          def secrets = [[
-            path: env.VAULT_PATH,
-            engineVersion: 2,
-            secretValues: [
-              [envVar: "DOCKERHUB_USER", vaultKey: "DOCKERHUB_USER"],
-              [envVar: "DOCKERHUB_PASS", vaultKey: "DOCKERHUB_PASS"]
-            ]
-          ]]
+  when { expression { return env.CHANGED_DIRS?.trim() } }
+  steps {
+    script {
+      def secrets = [[
+        path: env.VAULT_PATH,
+        engineVersion: 2,
+        secretValues: [
+          [envVar: "DOCKERHUB_USER", vaultKey: "DOCKERHUB_USER"],
+          [envVar: "DOCKERHUB_PASS", vaultKey: "DOCKERHUB_PASS"]
+        ]
+      ]]
 
-          withVault(vaultSecrets: secrets) {
-            container("docker") {
-              sh '''
-                echo "Waiting for Docker daemon..."
-                timeout=60
-                while [ $timeout -gt 0 ]; do
-                  if docker info >/dev/null 2>&1; then
-                    echo "Docker daemon is ready"
-                    break
-                  fi
-                  sleep 2
-                  timeout=$((timeout - 2))
-                done
+      withVault(vaultSecrets: secrets) {
+        container("docker") {
+          sh '''
+            echo "Waiting for Docker daemon..."
+            timeout=60
+            while [ $timeout -gt 0 ]; do
+              if docker info >/dev/null 2>&1; then
+                echo "Docker daemon is ready"
+                break
+              fi
+              sleep 2
+              timeout=$((timeout - 2))
+            done
 
-                if ! docker info >/dev/null 2>&1; then
-                  echo "ERROR: Docker daemon failed to start"
-                  exit 1
-                fi
+            if ! docker info >/dev/null 2>&1; then
+              echo "ERROR: Docker daemon failed to start"
+              exit 1
+            fi
 
-                echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
-              '''
+            # Register QEMU for cross-platform builds
+            echo "Setting up QEMU for multi-arch builds..."
+            docker run --rm --privileged tonistiigi/binfmt:latest --install all
+            
+            echo "Enabled platforms:"
+            docker run --rm --privileged tonistiigi/binfmt:latest
 
-              def dirs = env.CHANGED_DIRS?.trim()
-                ? env.CHANGED_DIRS.split("\\s+")
-                : []
+            echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
+          '''
 
-              for (dir in dirs) {
-                script {
-                  def version = readFile("${dir}/version.txt").trim()
-                  def imageName = dir
+          def dirs = env.CHANGED_DIRS?.trim()
+            ? env.CHANGED_DIRS.split("\\s+")
+            : []
 
-                  echo "== Building ${imageName}:${version} for linux/arm64 and linux/amd64 =="
+          for (dir in dirs) {
+            script {
+              def version = readFile("${dir}/version.txt").trim()
+              def imageName = dir
 
-                  sh """
-                    set -euo pipefail
+              echo "== Building ${imageName}:${version} for linux/arm64 and linux/amd64 =="
 
-                    docker build \
-                      --platform linux/arm64 \
-                      --build-arg VERSION=${version} \
-                      --build-arg TARGETARCH=arm64 \
-                      --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
-                      ${dir}
+              sh """
+                set -euo pipefail
 
-                    docker build \
-                      --platform linux/amd64 \
-                      --build-arg VERSION=${version} \
-                      --build-arg TARGETARCH=amd64 \
-                      --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64 \
-                      ${dir}
+                docker build \
+                  --platform linux/arm64 \
+                  --build-arg VERSION=${version} \
+                  --build-arg TARGETARCH=arm64 \
+                  --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
+                  ${dir}
 
-                    docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64
-                    docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
+                docker build \
+                  --platform linux/amd64 \
+                  --build-arg VERSION=${version} \
+                  --build-arg TARGETARCH=amd64 \
+                  --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64 \
+                  ${dir}
 
-                    # Create multi-arch manifest for version tag
-                    docker manifest create ${DOCKER_NAMESPACE}/${imageName}:${version} \
-                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
-                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
-                    docker manifest push ${DOCKER_NAMESPACE}/${imageName}:${version}
+                docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64
+                docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
 
-                    # Create multi-arch manifest for latest tag
-                    docker manifest create ${DOCKER_NAMESPACE}/${imageName}:latest \
-                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
-                      --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
-                    docker manifest push ${DOCKER_NAMESPACE}/${imageName}:latest
+                # Create multi-arch manifest for version tag
+                docker manifest create ${DOCKER_NAMESPACE}/${imageName}:${version} \
+                  --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
+                  --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
+                docker manifest push ${DOCKER_NAMESPACE}/${imageName}:${version}
 
-                    echo "== Done: ${imageName}:${version} (arm64 + amd64) =="
-                  """
-                }
-              }
+                # Create multi-arch manifest for latest tag
+                docker manifest create ${DOCKER_NAMESPACE}/${imageName}:latest \
+                  --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
+                  --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
+                docker manifest push ${DOCKER_NAMESPACE}/${imageName}:latest
 
-              sh "docker logout"
+                echo "== Done: ${imageName}:${version} (arm64 + amd64) =="
+              """
             }
           }
+
+          sh "docker logout"
         }
       }
     }
+  }
+}
   }
 
   post {
