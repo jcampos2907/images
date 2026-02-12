@@ -1,6 +1,7 @@
-FROM --platform=$TARGETPLATFORM alpine:3.20
+FROM  alpine:3.20
 
 ARG VERSION=v1.31.3
+ENV VERSION=${VERSION}
 ARG TARGETARCH
 
 RUN apk add --no-cache \

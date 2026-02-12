@@ -1,4 +1,4 @@
-FROM --platform=$TARGETPLATFORM alpine:3.20
+FROM  alpine:3.20
 
 ARG VERSION=2.52.0
 ENV VERSION=${VERSION}

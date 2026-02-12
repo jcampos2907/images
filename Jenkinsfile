@@ -133,20 +133,9 @@ spec:
                   exit 1
                 fi
 
-                # Disable IPv6 in the Docker daemon
-                echo "Disabling IPv6..."
+                # Disable IPv6
                 sysctl -w net.ipv6.conf.all.disable_ipv6=1 || true
                 sysctl -w net.ipv6.conf.default.disable_ipv6=1 || true
-
-                # Test connectivity before proceeding
-                echo "Testing Docker Hub connectivity..."
-                wget -q --timeout=10 -O- https://registry-1.docker.io/v2/ || \
-                curl -sf --max-time 10 https://registry-1.docker.io/v2/ || \
-                echo "Warning: connectivity test failed, proceeding anyway..."
-
-                # Register QEMU for cross-platform builds
-                echo "Setting up QEMU for multi-arch builds..."
-                docker run --rm --privileged tonistiigi/binfmt:latest --install all
 
                 echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
               '''
@@ -160,42 +149,24 @@ spec:
                   def version = readFile("${dir}/version.txt").trim()
                   def imageName = dir
 
-                  echo "== Building ${imageName}:${version} for linux/arm64 and linux/amd64 =="
+                  echo "== Building ${imageName}:${version} =="
 
                   retry(3) {
                     sh """
                       set -euo pipefail
 
                       docker build \
-                        --platform linux/arm64 \
-                        --build-arg VERSION=${version} \
-                        --build-arg TARGETARCH=arm64 \
-                        --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
-                        ${dir} || { sleep 15; exit 1; }
-
-                      docker build \
                         --platform linux/amd64 \
                         --build-arg VERSION=${version} \
                         --build-arg TARGETARCH=amd64 \
-                        --tag ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64 \
+                        --tag ${DOCKER_NAMESPACE}/${imageName}:${version} \
+                        --tag ${DOCKER_NAMESPACE}/${imageName}:latest \
                         ${dir} || { sleep 15; exit 1; }
 
-                      docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64
-                      docker push ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
+                      docker push ${DOCKER_NAMESPACE}/${imageName}:${version}
+                      docker push ${DOCKER_NAMESPACE}/${imageName}:latest
 
-                      # Create multi-arch manifest for version tag
-                      docker manifest create ${DOCKER_NAMESPACE}/${imageName}:${version} \
-                        --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
-                        --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
-                      docker manifest push ${DOCKER_NAMESPACE}/${imageName}:${version}
-
-                      # Create multi-arch manifest for latest tag
-                      docker manifest create ${DOCKER_NAMESPACE}/${imageName}:latest \
-                        --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-arm64 \
-                        --amend ${DOCKER_NAMESPACE}/${imageName}:${version}-amd64
-                      docker manifest push ${DOCKER_NAMESPACE}/${imageName}:latest
-
-                      echo "== Done: ${imageName}:${version} (arm64 + amd64) =="
+                      echo "== Done: ${imageName}:${version} =="
                     """
                   }
                 }
