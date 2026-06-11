@@ -45,7 +45,9 @@
 				"N8N_SENTRY_DSN",
 				"N8N_VERSION",
 				"ENVIRONMENT",
-				"DEPLOYMENT_NAME"
+				"DEPLOYMENT_NAME",
+				"OPENAI_API_KEY",
+				"OPENAI_BASE_URL"
 			],
 			"env-overrides": {
 				"N8N_RUNNERS_STDLIB_ALLOW": "*",
