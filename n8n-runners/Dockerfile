@@ -2,16 +2,23 @@ ARG VERSION=2.21.0
 FROM n8nio/runners:${VERSION}
 
 # n8n 2.x runs the Code node (JavaScript AND Python "native") inside this
-# external task-runner image, NOT in the main n8n container. Third-party
-# Python packages must therefore be installed into the python task runner's
-# own venv (/opt/runners/task-runner-python) and then allowlisted at runtime
-# via N8N_RUNNERS_EXTERNAL_ALLOW (set on the runner container in k8s).
+# external task-runner image, NOT in the main n8n container. To use third-party
+# Python packages in a Python Code node you must BOTH:
+#   1. install them into the python runner's venv (/opt/runners/task-runner-python)
+#   2. allowlist them in the launcher config's python "env-overrides"
+#      (N8N_RUNNERS_EXTERNAL_ALLOW / N8N_RUNNERS_STDLIB_ALLOW). Setting those as
+#      container env vars does NOT work — the launcher overrides them per-runner.
 USER root
 
-# markitdown[all] -> convert docs/pdf/pptx/xlsx/html/images to Markdown
-# openai           -> OpenAI API client
+# markitdown -> convert docs/pdf/pptx/xlsx/html/images/audio to Markdown
+# openai     -> OpenAI API client
+# Plain markitdown (not markitdown[all]): the base image is Alpine/musl and the
+# [all] extra pulls onnxruntime/magika, which have no musllinux wheel.
 RUN cd /opt/runners/task-runner-python \
-    && uv pip install --no-cache 'markitdown[all]' openai \
+    && uv pip install --no-cache markitdown openai \
     && uv pip show markitdown openai
+
+# Launcher config with markitdown + openai allowlisted for the Python runner.
+COPY n8n-task-runners.json /etc/n8n-task-runners.json
 
 USER runner
