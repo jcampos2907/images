@@ -15,8 +15,8 @@ USER root
 # Plain markitdown (not markitdown[all]): the base image is Alpine/musl and the
 # [all] extra pulls onnxruntime/magika, which have no musllinux wheel.
 RUN cd /opt/runners/task-runner-python \
-    && uv pip install --no-cache markitdown openai \
-    && uv pip show markitdown openai
+    && uv pip install --no-cache markitdown openai pandas openpyxl tabulate \
+    && uv pip show markitdown openai pandas
 
 # Launcher config with markitdown + openai allowlisted for the Python runner.
 COPY n8n-task-runners.json /etc/n8n-task-runners.json
