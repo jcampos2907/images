@@ -14,8 +14,12 @@ USER root
 # openai     -> OpenAI API client
 # Plain markitdown (not markitdown[all]): the base image is Alpine/musl and the
 # [all] extra pulls onnxruntime/magika, which have no musllinux wheel.
+# markitdown/openai/pandas: doc+sheet inspection for Code nodes.
+# Extra engines (imported transitively by pandas/markitdown, so no allowlist
+# entry needed): pyxlsb=xlsb, odfpy=ods, python-docx=docx, openpyxl=xlsx/xlsm,
+# tabulate=df.to_markdown. xls(xlrd)/pptx/html/images already covered.
 RUN cd /opt/runners/task-runner-python \
-    && uv pip install --no-cache markitdown openai pandas openpyxl tabulate \
+    && uv pip install --no-cache markitdown openai pandas openpyxl tabulate xlrd pyxlsb odfpy python-docx \
     && uv pip show markitdown openai pandas
 
 # Launcher config with markitdown + openai allowlisted for the Python runner.
