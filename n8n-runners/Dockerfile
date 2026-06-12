@@ -19,7 +19,7 @@ USER root
 # entry needed): pyxlsb=xlsb, odfpy=ods, python-docx=docx, openpyxl=xlsx/xlsm,
 # tabulate=df.to_markdown. xls(xlrd)/pptx/html/images already covered.
 RUN cd /opt/runners/task-runner-python \
-    && uv pip install --no-cache markitdown openai pandas openpyxl tabulate xlrd pyxlsb odfpy python-docx \
+    && uv pip install --no-cache markitdown openai pandas openpyxl tabulate xlrd pyxlsb odfpy python-docx pymupdf \
     && uv pip show markitdown openai pandas
 
 # Launcher config with markitdown + openai allowlisted for the Python runner.
