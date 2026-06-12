@@ -51,7 +51,7 @@
 			],
 			"env-overrides": {
 				"N8N_RUNNERS_STDLIB_ALLOW": "*",
-				"N8N_RUNNERS_EXTERNAL_ALLOW": "markitdown,openai,pandas,openpyxl",
+				"N8N_RUNNERS_EXTERNAL_ALLOW": "markitdown,openai,pandas,openpyxl,pymupdf",
 				"N8N_BLOCK_RUNNER_ENV_ACCESS": "false"
 			}
 		}
