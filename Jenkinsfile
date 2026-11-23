@@ -1,30 +1,12 @@
 pipeline {
-  agent {
-    kubernetes {
-      defaultContainer "jnlp"
-      yaml """
-apiVersion: v1
-kind: Pod
-spec:
-  containers:
-  - name: docker
-    image: docker:27-dind
-    securityContext:
-      privileged: true
-    env:
-    - name: DOCKER_TLS_CERTDIR
-      value: ""
-    - name: DOCKER_OPTS
-      value: "--ipv6=false --dns=8.8.8.8 --dns=1.1.1.1"
-    volumeMounts:
-    - name: docker-cache
-      mountPath: /var/lib/docker
-  volumes:
-  - name: docker-cache
-    persistentVolumeClaim:
-      claimName: docker-cache-pvc
-"""
-    }
+  // Builds run on nacho-3 (Hetzner amd64 VM, Jenkins SSH agent over the tailnet):
+  // native amd64 builds with the host Docker, whose layer cache persists between builds.
+  agent { label 'nacho-3' }
+
+  options {
+    disableConcurrentBuilds()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+    timeout(time: 90, unit: 'MINUTES')
   }
 
   environment {
@@ -36,7 +18,6 @@ spec:
 
     stage("Detect Changed Image Folders") {
       steps {
-        container("jnlp") {
           script {
             env.GIT_SHA = sh(script: "git rev-parse --short=8 HEAD", returnStdout: true).trim()
             def head = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
@@ -95,7 +76,6 @@ spec:
             env.CHANGED_DIRS = imageDirs.join(" ")
             echo "Changed image dirs: ${env.CHANGED_DIRS ?: 'none'}"
           }
-        }
       }
     }
 
@@ -113,30 +93,8 @@ spec:
           ]]
 
           withVault(vaultSecrets: secrets) {
-            container("docker") {
-              sh '''
+            sh '''#!/bin/bash
                 set -euo pipefail
-
-                echo "Waiting for Docker daemon..."
-                timeout=60
-                while [ $timeout -gt 0 ]; do
-                  if docker info >/dev/null 2>&1; then
-                    echo "Docker daemon is ready"
-                    break
-                  fi
-                  sleep 2
-                  timeout=$((timeout - 2))
-                done
-
-                if ! docker info >/dev/null 2>&1; then
-                  echo "ERROR: Docker daemon failed to start"
-                  exit 1
-                fi
-
-                # Disable IPv6
-                sysctl -w net.ipv6.conf.all.disable_ipv6=1 || true
-                sysctl -w net.ipv6.conf.default.disable_ipv6=1 || true
-
                 echo "${DOCKERHUB_PASS}" | docker login -u "${DOCKERHUB_USER}" --password-stdin
               '''
 
@@ -152,7 +110,7 @@ spec:
                   echo "== Building ${imageName}:${version} =="
 
                   retry(3) {
-                    sh """
+                    sh """#!/bin/bash
                       set -euo pipefail
 
                       docker build \
@@ -173,7 +131,6 @@ spec:
               }
 
               sh "docker logout"
-            }
           }
         }
       }
@@ -182,6 +139,9 @@ spec:
 
   post {
     always {
+      sh 'docker logout >/dev/null 2>&1 || true'
+      // Keep a week of build cache and drop dangling images so nacho-3's disk doesn't fill.
+      sh 'docker builder prune -f --filter until=168h >/dev/null 2>&1 || true; docker image prune -f >/dev/null 2>&1 || true'
       echo "Done. Built: ${env.CHANGED_DIRS ?: 'none'}"
     }
   }
