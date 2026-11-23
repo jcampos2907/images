@@ -71,9 +71,7 @@ pipeline {
               .collect { it.tokenize('/')[0] }
               .unique()
 
-            // A folder is an image if it has its own Dockerfile, or a source.env naming a
-            // (private) repo and commit whose root Dockerfile is built instead.
-            def imageDirs = dirs.findAll { d -> fileExists("${d}/Dockerfile") || fileExists("${d}/source.env") }
+            def imageDirs = dirs.findAll { d -> fileExists("${d}/Dockerfile") }
 
             env.CHANGED_DIRS = imageDirs.join(" ")
             echo "Changed image dirs: ${env.CHANGED_DIRS ?: 'none'}"
@@ -108,37 +106,6 @@ pipeline {
                 script {
                   def version = readFile("${dir}/version.txt").trim()
                   def imageName = dir
-                  def context = dir
-
-                  if (fileExists("${dir}/source.env")) {
-                    def src = [:]
-                    readFile("${dir}/source.env").split("\\n").each { line ->
-                      def l = line.trim()
-                      if (l && !l.startsWith("#") && l.contains("=")) {
-                        def i = l.indexOf("=")
-                        src[l.substring(0, i).trim()] = l.substring(i + 1).trim()
-                      }
-                    }
-                    if (!src.REPO || !src.REF) { error("${dir}/source.env needs REPO and REF") }
-                    context = ".src/${dir}"
-                    echo "== Fetching ${src.REPO}@${src.REF} =="
-                    // The source repo is private: fetch the pinned commit with the GitHub PAT.
-                    // Only that commit's tree is used as the build context; nothing is committed here.
-                    withCredentials([usernamePassword(
-                      credentialsId: 'github-pat',
-                      usernameVariable: 'GH_USER',
-                      passwordVariable: 'GH_PAT'
-                    )]) {
-                      sh """#!/bin/bash
-                        set -euo pipefail
-                        rm -rf ${context} && mkdir -p ${context}
-                        cd ${context}
-                        git init -q
-                        git fetch -q --depth 1 "https://\${GH_USER}:\${GH_PAT}@github.com/${src.REPO}.git" ${src.REF}
-                        git checkout -q FETCH_HEAD
-                      """
-                    }
-                  }
 
                   echo "== Building ${imageName}:${version} =="
 
@@ -152,7 +119,7 @@ pipeline {
                         --build-arg TARGETARCH=amd64 \
                         --tag ${DOCKER_NAMESPACE}/${imageName}:${version} \
                         --tag ${DOCKER_NAMESPACE}/${imageName}:latest \
-                        ${context} || { sleep 15; exit 1; }
+                        ${dir} || { sleep 15; exit 1; }
 
                       docker push ${DOCKER_NAMESPACE}/${imageName}:${version}
                       docker push ${DOCKER_NAMESPACE}/${imageName}:latest
@@ -172,7 +139,7 @@ pipeline {
 
   post {
     always {
-      sh 'docker logout >/dev/null 2>&1 || true; rm -rf .src'
+      sh 'docker logout >/dev/null 2>&1 || true'
       // Keep a week of build cache and drop dangling images so nacho-3's disk doesn't fill.
       sh 'docker builder prune -f --filter until=168h >/dev/null 2>&1 || true; docker image prune -f >/dev/null 2>&1 || true'
       echo "Done. Built: ${env.CHANGED_DIRS ?: 'none'}"
